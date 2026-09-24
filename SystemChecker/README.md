@@ -54,6 +54,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\06_network.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\07_credentials.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\08_files.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\09_browser.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\10_events.ps1
 ```
 
 `-Plain` turns ANSI color off. Color is on by default. `-Log` appends the same text without color codes. Console text uses `Write-Host`, so shell redirection is not a substitute for `-Log`.
@@ -73,7 +74,7 @@ The default runner selection is `system`, `users`, `services`, and `network`. Fi
 | creds | modules/07_credentials.ps1 | Implemented |
 | files | modules/08_files.ps1 | Implemented |
 | browser | modules/09_browser.ps1 | Implemented |
-| events | modules/10_events.ps1 | Stub |
+| events | modules/10_events.ps1 | Implemented |
 | cloud | modules/11_cloud.ps1 | Stub |
 | ad | modules/12_ad_optional.ps1 | Stub |
 
@@ -105,4 +106,4 @@ Servicing notes compare the installed build with published lifecycle dates only.
 5. Reuse helpers in `00_common.ps1` (`Get-SCRegistryValue`, `Get-SCAclSummary`, `Test-SCWritableByNonAdmin`, `Test-SCUnquotedPath`, `Invoke-SCNative`). Do not shell out to tools you found on disk.
 6. Update the `Status` field for that row in `Run-SystemChecker.ps1` when the module is real.
 
-`10_events.ps1` is the suggested next module. It is still a stub. The other stubs are cloud and ad. `08_files.ps1` and `09_browser.ps1` are implemented and stay out of the default run (`system`, `users`, `services`, `network`).
+`11_cloud.ps1` is the suggested next module. It is still a stub. The other stub is ad. `08_files.ps1`, `09_browser.ps1`, and `10_events.ps1` are implemented and stay out of the default run (`system`, `users`, `services`, `network`).

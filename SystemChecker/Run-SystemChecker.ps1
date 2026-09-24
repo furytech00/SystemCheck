@@ -70,7 +70,7 @@ function Get-SCCatalog {
         @{ Name = 'creds';     File = '07_credentials.ps1';  Status = 'ready'; Purpose = 'Credential names and leftover paths' }
         @{ Name = 'files';     File = '08_files.ps1';        Status = 'ready'; Purpose = 'Bounded folder ACLs and file names' }
         @{ Name = 'browser';   File = '09_browser.ps1';      Status = 'ready'; Purpose = 'Installed browsers and profile folders' }
-        @{ Name = 'events';    File = '10_events.ps1';       Status = 'stub';  Purpose = 'Optional event-log summary' }
+        @{ Name = 'events';    File = '10_events.ps1';       Status = 'ready'; Purpose = 'Bounded event-log counts' }
         @{ Name = 'cloud';     File = '11_cloud.ps1';        Status = 'stub';  Purpose = 'Cloud guest-agent presence' }
         @{ Name = 'ad';        File = '12_ad_optional.ps1';  Status = 'stub';  Purpose = 'Optional Active Directory context' }
     )
