@@ -56,11 +56,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\08_files.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\09_browser.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\10_events.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\11_cloud.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\12_ad_optional.ps1
 ```
 
 `-Plain` turns ANSI color off. Color is on by default. `-Log` appends the same text without color codes. Console text uses `Write-Host`, so shell redirection is not a substitute for `-Log`.
 
-The default runner selection is `system`, `users`, `services`, and `network`. File searches, event-log sweeps, and cloud guest-agent checks are not in the default set.
+The default runner selection is `system`, `users`, `services`, and `network`. File searches, event-log sweeps, cloud guest-agent checks, and Active Directory context checks are not in the default set.
 
 ## Modules
 
@@ -77,11 +78,11 @@ The default runner selection is `system`, `users`, `services`, and `network`. Fi
 | browser | modules/09_browser.ps1 | Implemented |
 | events | modules/10_events.ps1 | Implemented |
 | cloud | modules/11_cloud.ps1 | Implemented |
-| ad | modules/12_ad_optional.ps1 | Stub |
+| ad | modules/12_ad_optional.ps1 | Implemented |
 
 You can also pass `01` or the file name. Unknown names are rejected.
 
-Stubs print `not implemented yet` and exit 0. They exist so the runner and the folder layout stay stable while later checks are added.
+Every module in this tree is implemented. Optional checks stay out of the default run.
 
 ## Output labels
 
@@ -107,4 +108,4 @@ Servicing notes compare the installed build with published lifecycle dates only.
 5. Reuse helpers in `00_common.ps1` (`Get-SCRegistryValue`, `Get-SCAclSummary`, `Test-SCWritableByNonAdmin`, `Test-SCUnquotedPath`, `Invoke-SCNative`). Do not shell out to tools you found on disk.
 6. Update the `Status` field for that row in `Run-SystemChecker.ps1` when the module is real.
 
-`12_ad_optional.ps1` is the suggested next module. It is still a stub. `08_files.ps1`, `09_browser.ps1`, `10_events.ps1`, and `11_cloud.ps1` are implemented and stay out of the default run (`system`, `users`, `services`, `network`).
+All modules are implemented. `08_files.ps1`, `09_browser.ps1`, `10_events.ps1`, `11_cloud.ps1`, and `12_ad_optional.ps1` stay out of the default run (`system`, `users`, `services`, `network`).

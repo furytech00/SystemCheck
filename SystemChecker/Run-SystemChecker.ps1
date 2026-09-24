@@ -6,7 +6,7 @@
 .DESCRIPTION
     Read-only assessment driver for Windows PowerShell 5.1.
     Default modules are system, users, services, and network.
-    File searches, event-log sweeps, and cloud guest-agent checks stay opt-in.
+    File searches, event-log sweeps, cloud guest-agent checks, and Active Directory context stay opt-in.
 
 .PARAMETER Modules
     Aliases to run. Accepts a comma-separated string or repeated values.
@@ -72,7 +72,7 @@ function Get-SCCatalog {
         @{ Name = 'browser';   File = '09_browser.ps1';      Status = 'ready'; Purpose = 'Installed browsers and profile folders' }
         @{ Name = 'events';    File = '10_events.ps1';       Status = 'ready'; Purpose = 'Bounded event-log counts' }
         @{ Name = 'cloud';     File = '11_cloud.ps1';        Status = 'ready'; Purpose = 'Cloud guest-agent presence' }
-        @{ Name = 'ad';        File = '12_ad_optional.ps1';  Status = 'stub';  Purpose = 'Optional Active Directory context' }
+        @{ Name = 'ad';        File = '12_ad_optional.ps1';  Status = 'ready'; Purpose = 'Domain join, site, and DC reachability' }
     )
 }
 
@@ -111,7 +111,7 @@ function Show-SCModuleList {
     Write-Host ''
     Write-Host 'Default run: system, users, services, network'
     Write-Host 'Aliases also accept 01..12 and the script file name.'
-    Write-Host 'files, browser, events, and cloud are not part of the default run.'
+    Write-Host 'files, browser, events, cloud, and ad are not part of the default run.'
 }
 
 function Resolve-SCSelection {
