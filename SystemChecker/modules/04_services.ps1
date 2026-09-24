@@ -112,7 +112,7 @@ function Expand-SCSystemPath {
     if ($text.StartsWith('\??\')) {
         $text = $text.Substring(4)
     }
-    if ($text.Length -ge 11 -and $text.Substring(0, 11).Equals('\SystemRoot', [StringComparison]::OrdinalIgnoreCase)) {
+    if ($text.Length -ge 11 -and [string]::Equals($text.Substring(0, 11), '\SystemRoot', [System.StringComparison]::OrdinalIgnoreCase)) {
         $rest = ''
         if ($text.Length -gt 11) { $rest = $text.Substring(11) }
         $root = $env:SystemRoot
@@ -177,7 +177,7 @@ function Test-SCMicrosoftBinary {
         $full = $Path.Trim()
         if ($full.Length -ge $root.Length) {
             $head = $full.Substring(0, $root.Length)
-            if ($head.Equals($root, [StringComparison]::OrdinalIgnoreCase)) {
+            if ([string]::Equals($head, $root, [System.StringComparison]::OrdinalIgnoreCase)) {
                 if ($full.Length -eq $root.Length) { return $true }
                 if ($full[$root.Length] -eq '\') { return $true }
             }
@@ -258,8 +258,8 @@ function Test-SCEveryoneName {
         $parts = $Name.Split('\')
         $leaf = $parts[$parts.Length - 1]
     }
-    if ($leaf.Equals('Everyone', [StringComparison]::OrdinalIgnoreCase)) { return $true }
-    if ($Name.Equals('S-1-1-0', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ([string]::Equals($leaf, 'Everyone', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ([string]::Equals($Name, 'S-1-1-0', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     return $false
 }
 
@@ -272,10 +272,10 @@ function Test-SCCurrentUserPrincipal {
         $leaf = $parts[$parts.Length - 1]
     }
     $user = $env:USERNAME
-    if ($user -and $leaf.Equals($user, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($user -and [string]::Equals($leaf, [string]$user, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     if ($env:USERDOMAIN -and $user) {
         $full = '{0}\{1}' -f $env:USERDOMAIN, $user
-        if ($Principal.Equals($full, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if ([string]::Equals($Principal, $full, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
     return $false
 }
@@ -360,8 +360,8 @@ function Get-SCRegistryWriteInfo {
             }
             if (Test-SCPrivilegedIdentity -Sid $sid -Name $identity) { continue }
             $isBroad = Test-SCBroadIdentity -Sid $sid -Name $identity
-            if ($nonAdmin -notcontains $identity) { [void]$nonAdmin.Add($identity) }
-            if ($isBroad -and ($broad -notcontains $identity)) { [void]$broad.Add($identity) }
+            if (-not (Test-SCStringInList -List $nonAdmin -Value $identity)) { [void]$nonAdmin.Add($identity) }
+            if ($isBroad -and -not (Test-SCStringInList -List $broad -Value $identity)) { [void]$broad.Add($identity) }
         }
         $result.Principals = $nonAdmin.ToArray()
         $result.BroadPrincipals = $broad.ToArray()
@@ -458,7 +458,7 @@ function Add-SCGroupedWrite {
         $entry.Level = 'WEAK'
         if (@($BroadPrincipals).Count -gt 0) { $entry.BroadPrincipals = @($BroadPrincipals) }
     }
-    if ($OwnerName -and ($entry.Names -notcontains $OwnerName)) {
+    if ($OwnerName -and -not (Test-SCStringInList -List $entry.Names -Value $OwnerName)) {
         [void]$entry.Names.Add($OwnerName)
     }
 }
@@ -928,10 +928,14 @@ function Invoke-SCCheckServices {
 }
 
 function New-SCActionRecord {
-    param([string]$Executable, [bool]$Unquoted)
+    # $Unquoted is not [bool]. Windows PowerShell 5.1 mis-binds
+    # -Unquoted (expression) on a bool parameter.
+    param([string]$Executable, $Unquoted)
+    $flag = $false
+    if ($Unquoted -eq $true) { $flag = $true }
     return New-Object psobject -Property @{
         Executable = $Executable
-        Unquoted   = $Unquoted
+        Unquoted   = $flag
     }
 }
 
@@ -998,7 +1002,8 @@ function Convert-SCSchtasksRows {
         if ($userName) { $user = [string](Get-SCProp $row $userName) }
         $state = ''
         if ($stateName) { $state = [string](Get-SCProp $row $stateName) }
-        $action = New-SCActionRecord -Executable $exe -Unquoted (Test-SCUnquotedPath -Path $toRun)
+        $unquoted = Test-SCUnquotedPath -Path $toRun
+        $action = New-SCActionRecord -Executable $exe -Unquoted:$unquoted
         [void]$rows.Add((New-SCTaskRecord -Name $taskName -User $user -State $state -Actions @($action)))
     }
     return New-Object psobject -Property @{
@@ -1043,7 +1048,8 @@ function Get-SCTaskRecords {
                     if (-not $execProp) { continue }
                     $exec = [string]$execProp.Value
                     if (-not $exec) { continue }
-                    [void]$actions.Add((New-SCActionRecord -Executable $exec -Unquoted (Test-SCUnquotedPath -Path $exec)))
+                    $unquoted = Test-SCUnquotedPath -Path $exec
+                    [void]$actions.Add((New-SCActionRecord -Executable $exec -Unquoted:$unquoted))
                 }
                 [void]$items.Add((New-SCTaskRecord -Name $fullName -User $user -State $state -Actions $actions.ToArray()))
             }
