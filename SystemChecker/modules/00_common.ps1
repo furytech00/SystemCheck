@@ -469,6 +469,22 @@ function New-SCAclResult {
     }
 }
 
+function ConvertTo-SCArray {
+    # @($value) throws "Argument types do not match" for List[object] under
+    # Set-StrictMode 2.0. Copy items instead. A string stays one element.
+    param($Value)
+    $copy = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Value) { return ,$copy.ToArray() }
+    $asString = $Value -is [string]
+    $enumerable = (-not $asString) -and ($Value -is [System.Collections.IEnumerable])
+    if ($enumerable) {
+        foreach ($item in $Value) { [void]$copy.Add($item) }
+    } else {
+        [void]$copy.Add($Value)
+    }
+    return ,$copy.ToArray()
+}
+
 function Test-SCStringInList {
     # Windows PowerShell 5.1 binds -contains on List[string] to Contains(T)
     # and throws "Argument types do not match". Compare the strings directly.
@@ -505,7 +521,7 @@ function Get-SCFileAclSummary {
             NonAdmin = New-Object System.Collections.Generic.List[string]
             Broad    = New-Object System.Collections.Generic.List[string]
         }
-        foreach ($ace in @($acl.Access)) {
+        foreach ($ace in (ConvertTo-SCArray $acl.Access)) {
             if (-not $ace) { continue }
             $identity = [string]$ace.IdentityReference
             $sid = $null
@@ -587,7 +603,7 @@ function Get-SCServiceAclSummary {
             NonAdmin = New-Object System.Collections.Generic.List[string]
             Broad    = New-Object System.Collections.Generic.List[string]
         }
-        foreach ($ace in @($descriptor.DACL)) {
+        foreach ($ace in (ConvertTo-SCArray $descriptor.DACL)) {
             if (-not $ace) { continue }
             $trustee = $ace.Trustee
             $name = $null
@@ -686,8 +702,8 @@ function Test-SCWritableByNonAdmin {
     $summary = Get-SCAclSummary -Path $Path
     $principals = @()
     $broad = @()
-    if ($summary.NonAdminWritePrincipals) { $principals = @($summary.NonAdminWritePrincipals) }
-    if ($summary.BroadWritePrincipals) { $broad = @($summary.BroadWritePrincipals) }
+    if ($summary.NonAdminWritePrincipals) { $principals = ConvertTo-SCArray $summary.NonAdminWritePrincipals }
+    if ($summary.BroadWritePrincipals) { $broad = ConvertTo-SCArray $summary.BroadWritePrincipals }
     return New-Object psobject -Property @{
         Writable        = ($principals.Count -gt 0)
         BroadWritable   = ($broad.Count -gt 0)

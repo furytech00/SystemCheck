@@ -24,6 +24,37 @@ if (-not (Test-Path -LiteralPath $commonPath)) {
 }
 . $commonPath
 
+function Test-SCStringInList {
+    # Local copy so -File .\modules\04_services.ps1 still works when 00_common.ps1
+    # is older than this module. -contains on List[string] throws in Windows
+    # PowerShell 5.1 ("Argument types do not match"), so compare items directly.
+    param($List, [string]$Value)
+    if ($null -eq $List) { return $false }
+    foreach ($item in $List) {
+        if ($null -eq $item) { continue }
+        if ([string]::Equals([string]$item, $Value, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function ConvertTo-SCArray {
+    # @($value) throws "Argument types do not match" for List[object] under
+    # Set-StrictMode 2.0. Copy items instead. A string stays one element.
+    param($Value)
+    $copy = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Value) { return ,$copy.ToArray() }
+    $asString = $Value -is [string]
+    $enumerable = (-not $asString) -and ($Value -is [System.Collections.IEnumerable])
+    if ($enumerable) {
+        foreach ($item in $Value) { [void]$copy.Add($item) }
+    } else {
+        [void]$copy.Add($Value)
+    }
+    return ,$copy.ToArray()
+}
+
 function Get-SCProp {
     param($Object, [string]$Name)
     if (-not $Object) { return $null }
@@ -79,7 +110,7 @@ function Test-SCCommandMissingText {
 function Format-SCNameList {
     param($Names, [int]$Max = 5)
     $arr = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @($Names)) {
+    foreach ($name in (ConvertTo-SCArray $Names)) {
         if ($name) { [void]$arr.Add([string]$name) }
     }
     if ($arr.Count -eq 0) { return '' }
@@ -338,7 +369,7 @@ function Get-SCRegistryWriteInfo {
         $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
         $nonAdmin = New-Object System.Collections.Generic.List[string]
         $broad = New-Object System.Collections.Generic.List[string]
-        foreach ($ace in @($acl.Access)) {
+        foreach ($ace in (ConvertTo-SCArray $acl.Access)) {
             if (-not $ace) { continue }
             $typeName = ''
             try { $typeName = $ace.AccessControlType.ToString() } catch { $typeName = '' }
@@ -395,12 +426,12 @@ function Get-SCNonAdminWriteLevel {
     }
     $principals = New-Object System.Collections.Generic.List[string]
     $broad = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @(Get-SCProp $Info 'Principals')) {
+    foreach ($name in (ConvertTo-SCArray (Get-SCProp $Info 'Principals'))) {
         if (-not $name) { continue }
         if ($IgnoreCurrentUser -and (Test-SCCurrentUserPrincipal -Principal $name)) { continue }
         [void]$principals.Add([string]$name)
     }
-    foreach ($name in @(Get-SCProp $Info 'BroadPrincipals')) {
+    foreach ($name in (ConvertTo-SCArray (Get-SCProp $Info 'BroadPrincipals'))) {
         if (-not $name) { continue }
         if ($IgnoreCurrentUser -and (Test-SCCurrentUserPrincipal -Principal $name)) { continue }
         [void]$broad.Add([string]$name)
@@ -448,15 +479,16 @@ function Add-SCGroupedWrite {
             Kind            = $Kind
             Level           = $Level
             Path            = $Path
-            Principals      = @($Principals)
-            BroadPrincipals = @($BroadPrincipals)
+            Principals      = (ConvertTo-SCArray $Principals)
+            BroadPrincipals = (ConvertTo-SCArray $BroadPrincipals)
             Names           = (New-Object System.Collections.Generic.List[string])
         }
     }
     $entry = $Map[$key]
     if ($Level -eq 'WEAK') {
         $entry.Level = 'WEAK'
-        if (@($BroadPrincipals).Count -gt 0) { $entry.BroadPrincipals = @($BroadPrincipals) }
+        $broadCopy = ConvertTo-SCArray $BroadPrincipals
+        if ($broadCopy.Count -gt 0) { $entry.BroadPrincipals = $broadCopy }
     }
     if ($OwnerName -and -not (Test-SCStringInList -List $entry.Names -Value $OwnerName)) {
         [void]$entry.Names.Add($OwnerName)
@@ -466,10 +498,10 @@ function Add-SCGroupedWrite {
 function Format-SCGroupedFinding {
     param($Entry)
     $who = 'a non-admin principal'
-    $names = @(Get-SCProp $Entry 'Principals')
+    $names = ConvertTo-SCArray (Get-SCProp $Entry 'Principals')
     if ($Entry.Level -eq 'WEAK') {
         $who = 'a broad principal'
-        $broadNames = @(Get-SCProp $Entry 'BroadPrincipals')
+        $broadNames = ConvertTo-SCArray (Get-SCProp $Entry 'BroadPrincipals')
         if ($broadNames.Count -gt 0) { $names = $broadNames }
     }
     $principalText = Format-SCNameList -Names $names -Max 4
@@ -491,7 +523,7 @@ function Format-SCGroupedFinding {
         'startup-dir'    { $noun = 'Startup folder is writable'; $subject = 'Folders' }
         'startup-target' { $noun = 'Startup shortcut target is writable'; $subject = 'Shortcuts' }
     }
-    $ownerText = Format-SCNameList -Names (Get-SCProp $Entry 'Names') -Max 5
+    $ownerText = Format-SCNameList -Names (ConvertTo-SCArray (Get-SCProp $Entry 'Names')) -Max 5
     $pathText = Format-SCShortText -Text ([string]$Entry.Path) -Max 140
     if ($ownerText) {
         return ('{0} by {1}: {2} ({3}). {4}: {5}' -f $noun, $who, $pathText, $principalText, $subject, $ownerText)
@@ -503,7 +535,7 @@ function Get-SCGroupedFindings {
     param($Map)
     $weak = New-Object System.Collections.Generic.List[object]
     $review = New-Object System.Collections.Generic.List[object]
-    foreach ($key in @($Map.Keys)) {
+    foreach ($key in $Map.Keys) {
         $entry = $Map[$key]
         $text = Format-SCGroupedFinding -Entry $entry
         $item = New-SCFinding -Level ([string]$entry.Level) -Text $text
@@ -522,7 +554,7 @@ function Write-SCSortedFindings {
     param($Items, [int]$Cap = 30)
     $weak = New-Object System.Collections.Generic.List[object]
     $review = New-Object System.Collections.Generic.List[object]
-    foreach ($item in @($Items)) {
+    foreach ($item in (ConvertTo-SCArray $Items)) {
         if (-not $item) { continue }
         if ($item.Level -eq 'WEAK') { [void]$weak.Add($item) }
         else { [void]$review.Add($item) }
@@ -530,7 +562,7 @@ function Write-SCSortedFindings {
     $shown = 0
     $hidden = 0
     foreach ($bucket in @($weak, $review)) {
-        foreach ($item in @($bucket)) {
+        foreach ($item in $bucket) {
             if (-not $item) { continue }
             if ($shown -ge $Cap) {
                 $hidden++
@@ -549,7 +581,7 @@ function Write-SCPathProblemSummary {
     param($Cache)
     $denied = 0
     $other = 0
-    foreach ($key in @($Cache.Keys)) {
+    foreach ($key in $Cache.Keys) {
         $info = $Cache[$key]
         $err = [string](Get-SCProp $info 'Error')
         if (-not $err) { continue }
@@ -729,7 +761,7 @@ function Get-SCServiceRecords {
 function Invoke-SCCheckServices {
     Start-SCSection -Title 'Services'
     $bag = Get-SCServiceRecords
-    $records = @($bag.Items)
+    $records = ConvertTo-SCArray $bag.Items
     if ($bag.Source -eq 'none') {
         $message = [string]$bag.Error
         if (Test-SCAccessDenied -Message $message) {
@@ -877,8 +909,8 @@ function Invoke-SCCheckServices {
 
     $groupedBag = Get-SCGroupedFindings -Map $grouped
     $groupedItems = @()
-    if ($groupedBag -and $groupedBag.Items) { $groupedItems = @($groupedBag.Items) }
-    $findingCount = @($extra).Count + @($groupedItems).Count
+    if ($groupedBag -and $groupedBag.Items) { $groupedItems = ConvertTo-SCArray $groupedBag.Items }
+    $findingCount = $extra.Count + $groupedItems.Count
     Write-SCInfo -Message ("Services: {0} total. Microsoft with no finding: {1}. Non-Microsoft: {2} ({3} automatic). Findings: {4}." -f $total, $quietMicrosoft, $nonMicrosoft, $nonMicrosoftAuto, $findingCount)
     if ($emptyImage -gt 0) {
         Write-SCInfo -Message ("Services with an empty ImagePath: {0}." -f $emptyImage)
@@ -891,13 +923,14 @@ function Invoke-SCCheckServices {
     }
 
     $all = New-Object System.Collections.Generic.List[object]
-    foreach ($item in @($extra)) { if ($item) { [void]$all.Add($item) } }
-    foreach ($item in @($groupedItems)) { if ($item) { [void]$all.Add($item) } }
+    foreach ($item in $extra) { if ($item) { [void]$all.Add($item) } }
+    foreach ($item in (ConvertTo-SCArray $groupedItems)) { if ($item) { [void]$all.Add($item) } }
     Write-SCSortedFindings -Items $all.ToArray() -Cap 30
 
     $shownInfo = 0
     $hiddenInfo = 0
-    $orderedInfo = @($infoRows.ToArray() | Sort-Object -Property Rank, Name)
+    $orderedInfo = ConvertTo-SCArray $infoRows
+    $orderedInfo = @($orderedInfo | Sort-Object -Property Rank, Name)
     foreach ($row in $orderedInfo) {
         if (-not $row) { continue }
         if ($shownInfo -ge 15) {
@@ -942,7 +975,7 @@ function New-SCActionRecord {
 function New-SCTaskRecord {
     param([string]$Name, [string]$User, [string]$State, $Actions)
     $clean = New-Object System.Collections.Generic.List[object]
-    foreach ($action in @($Actions)) {
+    foreach ($action in (ConvertTo-SCArray $Actions)) {
         if ($action) { [void]$clean.Add($action) }
     }
     return New-Object psobject -Property @{
@@ -956,7 +989,7 @@ function New-SCTaskRecord {
 function Convert-SCSchtasksRows {
     param([string[]]$Lines)
     $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($line in @($Lines)) {
+    foreach ($line in (ConvertTo-SCArray $Lines)) {
         if ($null -eq $line) { continue }
         $trim = ([string]$line).Trim()
         if (-not $trim) { continue }
@@ -981,7 +1014,7 @@ function Convert-SCSchtasksRows {
         $empty.Error = 'schtasks returned no task rows.'
         return $empty
     }
-    $names = @($parsed[0].PSObject.Properties.Name)
+    $names = ConvertTo-SCArray $parsed[0].PSObject.Properties.Name
     if (($names -notcontains 'TaskName') -or ($names -notcontains 'Task To Run')) {
         $empty.Error = 'schtasks CSV headers were not recognized. Task list was skipped.'
         return $empty
@@ -1075,10 +1108,10 @@ function Get-SCTaskRecords {
         }
     }
     if ($native.Ok) {
-        $parsed = Convert-SCSchtasksRows -Lines @($native.Output)
+        $parsed = Convert-SCSchtasksRows -Lines (ConvertTo-SCArray $native.Output)
         if (-not $parsed.Error) {
             return New-Object psobject -Property @{
-                Items  = @($parsed.Items)
+                Items  = (ConvertTo-SCArray $parsed.Items)
                 Source = 'schtasks'
                 Error  = $null
             }
@@ -1111,7 +1144,7 @@ function Invoke-SCCheckTasks {
         return
     }
 
-    $records = @($bag.Items)
+    $records = ConvertTo-SCArray $bag.Items
     $pathCache = @{}
     $grouped = @{}
     $extra = New-Object System.Collections.Generic.List[object]
@@ -1130,7 +1163,7 @@ function Invoke-SCCheckTasks {
             $isMicrosoft = Test-SCMicrosoftTaskName -Name $task.Name
             $hadFinding = $false
             $exeShown = New-Object System.Collections.Generic.List[string]
-            foreach ($action in @($task.Actions)) {
+            foreach ($action in (ConvertTo-SCArray $task.Actions)) {
                 if (-not $action) { continue }
                 $rawExe = [string]$action.Executable
                 if ($action.Unquoted) {
@@ -1180,20 +1213,20 @@ function Invoke-SCCheckTasks {
 
     $groupedBag = Get-SCGroupedFindings -Map $grouped
     $groupedItems = @()
-    if ($groupedBag -and $groupedBag.Items) { $groupedItems = @($groupedBag.Items) }
-    $findingCount = @($extra).Count + @($groupedItems).Count
+    if ($groupedBag -and $groupedBag.Items) { $groupedItems = ConvertTo-SCArray $groupedBag.Items }
+    $findingCount = $extra.Count + $groupedItems.Count
     Write-SCInfo -Message ("Scheduled tasks: {0} total. Microsoft with no finding: {1}. Non-Microsoft: {2}. Findings: {3}." -f $total, $quietMicrosoft, $nonMicrosoft, $findingCount)
     if ($networkPaths -gt 0) {
         Write-SCInfo -Message ("Network task paths were not opened: {0}." -f $networkPaths)
     }
     $all = New-Object System.Collections.Generic.List[object]
-    foreach ($item in @($extra)) { if ($item) { [void]$all.Add($item) } }
-    foreach ($item in @($groupedItems)) { if ($item) { [void]$all.Add($item) } }
+    foreach ($item in $extra) { if ($item) { [void]$all.Add($item) } }
+    foreach ($item in (ConvertTo-SCArray $groupedItems)) { if ($item) { [void]$all.Add($item) } }
     Write-SCSortedFindings -Items $all.ToArray() -Cap 30
 
     $shownInfo = 0
     $hiddenInfo = 0
-    foreach ($row in @($infoRows.ToArray())) {
+    foreach ($row in (ConvertTo-SCArray $infoRows)) {
         if (-not $row) { continue }
         if ($shownInfo -ge 15) {
             $hiddenInfo++
@@ -1229,7 +1262,7 @@ function Get-SCRunEntries {
     try {
         $key = Get-Item -LiteralPath $Path -ErrorAction Stop
         $list = New-Object System.Collections.Generic.List[object]
-        foreach ($name in @($key.GetValueNames())) {
+        foreach ($name in (ConvertTo-SCArray $key.GetValueNames())) {
             if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
             $raw = $null
             try {
@@ -1305,7 +1338,7 @@ function Invoke-SCCheckRunKeys {
         } elseif ($regLevel.Level -eq 'WEAK' -or $regLevel.Level -eq 'REVIEW') {
             Add-SCGroupedWrite -Map $grouped -Kind 'run-key' -Level $regLevel.Level -Path $spec.Path -Principals $regLevel.Principals -BroadPrincipals $regLevel.BroadPrincipals -OwnerName $spec.Label
         }
-        foreach ($entry in @($bag.Items)) {
+        foreach ($entry in (ConvertTo-SCArray $bag.Items)) {
             if (-not $entry) { continue }
             $valueCount++
             $label = '{0} / {1}' -f $spec.Label, $entry.Name
@@ -1330,15 +1363,15 @@ function Invoke-SCCheckRunKeys {
     Write-SCInfo -Message ("Run keys present: {0}. Values: {1}." -f $presentKeys, $valueCount)
     $groupedBag = Get-SCGroupedFindings -Map $grouped
     $groupedItems = @()
-    if ($groupedBag -and $groupedBag.Items) { $groupedItems = @($groupedBag.Items) }
+    if ($groupedBag -and $groupedBag.Items) { $groupedItems = ConvertTo-SCArray $groupedBag.Items }
     $all = New-Object System.Collections.Generic.List[object]
-    foreach ($item in @($extra)) { if ($item) { [void]$all.Add($item) } }
-    foreach ($item in @($groupedItems)) { if ($item) { [void]$all.Add($item) } }
+    foreach ($item in $extra) { if ($item) { [void]$all.Add($item) } }
+    foreach ($item in (ConvertTo-SCArray $groupedItems)) { if ($item) { [void]$all.Add($item) } }
     Write-SCSortedFindings -Items $all.ToArray() -Cap 30
 
     $shown = 0
     $hidden = 0
-    foreach ($row in @($infoRows.ToArray())) {
+    foreach ($row in (ConvertTo-SCArray $infoRows)) {
         if (-not $row) { continue }
         if ($shown -ge 40) { $hidden++; continue }
         $shown++
@@ -1408,7 +1441,7 @@ function Invoke-SCCheckStartup {
     Start-SCSection -Title 'Startup folders'
     $locationBag = Get-SCStartupLocations
     $locations = @()
-    if ($locationBag -and $locationBag.Items) { $locations = @($locationBag.Items) }
+    if ($locationBag -and $locationBag.Items) { $locations = ConvertTo-SCArray $locationBag.Items }
     if ($locations.Count -eq 0) {
         Write-SCWarn -Message 'Startup folder locations were not available.'
         return
@@ -1477,25 +1510,30 @@ function Invoke-SCCheckStartup {
     if ($seenFolders -eq 0) { return }
     $groupedBag = Get-SCGroupedFindings -Map $grouped
     $groupedItems = @()
-    if ($groupedBag -and $groupedBag.Items) { $groupedItems = @($groupedBag.Items) }
+    if ($groupedBag -and $groupedBag.Items) { $groupedItems = ConvertTo-SCArray $groupedBag.Items }
     Write-SCSortedFindings -Items $groupedItems -Cap 30
     Write-SCPathProblemSummary -Cache $pathCache
 }
 
 function Invoke-SCServicesCheck {
-    param([scriptblock]$Body, [string]$Name)
+    param([string]$Name)
+    # Run in this script. Test-SCStringInList is defined here so -File does not
+    # depend on an older 00_common.ps1, where the command would be missing.
     try {
-        & $Body
+        if ($Name -eq 'Services') { Invoke-SCCheckServices }
+        elseif ($Name -eq 'Scheduled tasks') { Invoke-SCCheckTasks }
+        elseif ($Name -eq 'Run keys') { Invoke-SCCheckRunKeys }
+        elseif ($Name -eq 'Startup folders') { Invoke-SCCheckStartup }
     } catch {
         Write-SCWarn -Message ("{0} check failed: {1}" -f $Name, (Format-SCShortText -Text $_.Exception.Message -Max 160))
     }
 }
 
 Write-SCHeader -Title 'Services'
-Invoke-SCServicesCheck -Name 'Services' -Body { Invoke-SCCheckServices }
-Invoke-SCServicesCheck -Name 'Scheduled tasks' -Body { Invoke-SCCheckTasks }
-Invoke-SCServicesCheck -Name 'Run keys' -Body { Invoke-SCCheckRunKeys }
-Invoke-SCServicesCheck -Name 'Startup folders' -Body { Invoke-SCCheckStartup }
+Invoke-SCServicesCheck -Name 'Services'
+Invoke-SCServicesCheck -Name 'Scheduled tasks'
+Invoke-SCServicesCheck -Name 'Run keys'
+Invoke-SCServicesCheck -Name 'Startup folders'
 Complete-SCSection
 Write-SCLine -Text ''
 Write-SCLine -Text 'Module complete: Services' -Style Dim
