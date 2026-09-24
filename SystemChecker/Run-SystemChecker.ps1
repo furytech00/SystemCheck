@@ -69,7 +69,7 @@ function Get-SCCatalog {
         @{ Name = 'network';   File = '06_network.ps1';      Status = 'ready'; Purpose = 'Listeners, shares, and firewall profile' }
         @{ Name = 'creds';     File = '07_credentials.ps1';  Status = 'ready'; Purpose = 'Credential names and leftover paths' }
         @{ Name = 'files';     File = '08_files.ps1';        Status = 'ready'; Purpose = 'Bounded folder ACLs and file names' }
-        @{ Name = 'browser';   File = '09_browser.ps1';      Status = 'stub';  Purpose = 'Browser presence, not stored secrets' }
+        @{ Name = 'browser';   File = '09_browser.ps1';      Status = 'ready'; Purpose = 'Installed browsers and profile folders' }
         @{ Name = 'events';    File = '10_events.ps1';       Status = 'stub';  Purpose = 'Optional event-log summary' }
         @{ Name = 'cloud';     File = '11_cloud.ps1';        Status = 'stub';  Purpose = 'Cloud guest-agent presence' }
         @{ Name = 'ad';        File = '12_ad_optional.ps1';  Status = 'stub';  Purpose = 'Optional Active Directory context' }
@@ -111,7 +111,7 @@ function Show-SCModuleList {
     Write-Host ''
     Write-Host 'Default run: system, users, services, network'
     Write-Host 'Aliases also accept 01..12 and the script file name.'
-    Write-Host 'files and events are not part of the default run.'
+    Write-Host 'files, browser, and events are not part of the default run.'
 }
 
 function Resolve-SCSelection {
