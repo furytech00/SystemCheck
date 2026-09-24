@@ -60,11 +60,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\09_browser.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\10_events.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\11_cloud.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\12_ad_optional.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\13_hardening.ps1
 ```
 
 `-Plain` turns ANSI color off. Color is on by default. `-Log` appends the same text without color codes. Console text uses `Write-Host`, so shell redirection is not a substitute for `-Log`.
 
-`-All` runs every ready module. `-Modules all` does the same. If both `-All` and `-Modules` are set, `-All` wins and any names passed to `-Modules` are ignored. A list that includes the token `all` also selects every ready module. An unknown name next to `all` is still rejected. The default runner selection is `system`, `users`, `services`, and `network`. File searches, event-log sweeps, cloud guest-agent checks, and Active Directory context checks are not in the default set.
+`-All` runs every ready module. `-Modules all` does the same. If both `-All` and `-Modules` are set, `-All` wins and any names passed to `-Modules` are ignored. A list that includes the token `all` also selects every ready module. An unknown name next to `all` is still rejected. The default runner selection is `system`, `users`, `services`, and `network`. File searches, event-log sweeps, cloud guest-agent checks, Active Directory context checks, and the hardening baseline are not in the default set. `-Modules hardening` runs that baseline alone. `-All` and `-Modules all` include it with the other ready modules.
 
 ## HTML report
 
@@ -101,8 +102,11 @@ The page groups INFO, REVIEW, WEAK, and WARN lines under the same module and sec
 | events | modules/10_events.ps1 | Implemented |
 | cloud | modules/11_cloud.ps1 | Implemented |
 | ad | modules/12_ad_optional.ps1 | Implemented |
+| hardening | modules/13_hardening.ps1 | Implemented |
 
-You can also pass `01` or the file name. Unknown names are rejected.
+You can also pass `01` or the file name (`13` or `13_hardening` for the hardening module). Unknown names are rejected.
+
+The hardening module reports baseline registry and feature posture that the other modules do not already cover: LM hash and NTLM level, anonymous SAM limits, HVCI, Secure Boot, BitLocker protection status, RDP and WinRM policy, SMB signing and SMB1, LLMNR, NetBIOS, and mDNS, screen lock, Defender cloud reporting, exclusions, and ASR rule states, a short inbound allow-rule sample, Winlogon Shell/Userinit, IFEO Debugger values, AppInit_DLLs, Point and Print policy, pending reboot and Windows Update policy, vulnerable-driver blocklist, AutoRun, Office macro policy, and MDM or Azure AD join evidence. UAC, LSA protection, WDigest, cached logons, Credential Guard, Defender real-time protection, AppLocker, and WDAC stay in the system module. Auto-logon, Guest, password expiry, and local Administrators stay in the users module. Listeners and firewall profile defaults stay in the network module.
 
 Every module in this tree is implemented. Optional checks stay out of the default run.
 
@@ -130,4 +134,4 @@ Servicing notes compare the installed build with published lifecycle dates only.
 5. Reuse helpers in `00_common.ps1` (`Get-SCRegistryValue`, `Get-SCAclSummary`, `Test-SCWritableByNonAdmin`, `Test-SCUnquotedPath`, `Invoke-SCNative`). Do not shell out to tools you found on disk.
 6. Update the `Status` field for that row in `Run-SystemChecker.ps1` when the module is real.
 
-All modules are implemented. `08_files.ps1`, `09_browser.ps1`, `10_events.ps1`, `11_cloud.ps1`, and `12_ad_optional.ps1` stay out of the default run (`system`, `users`, `services`, `network`).
+All modules are implemented. `08_files.ps1`, `09_browser.ps1`, `10_events.ps1`, `11_cloud.ps1`, `12_ad_optional.ps1`, and `13_hardening.ps1` stay out of the default run (`system`, `users`, `services`, `network`).

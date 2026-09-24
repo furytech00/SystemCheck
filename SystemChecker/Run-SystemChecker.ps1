@@ -92,6 +92,7 @@ function Get-SCCatalog {
         @{ Name = 'events';    File = '10_events.ps1';       Status = 'ready'; Purpose = 'Bounded event-log counts' }
         @{ Name = 'cloud';     File = '11_cloud.ps1';        Status = 'ready'; Purpose = 'Cloud guest-agent presence' }
         @{ Name = 'ad';        File = '12_ad_optional.ps1';  Status = 'ready'; Purpose = 'Domain join, site, and DC reachability' }
+        @{ Name = 'hardening'; File = '13_hardening.ps1';    Status = 'ready'; Purpose = 'Security baseline registry and feature posture' }
     )
 }
 
@@ -129,13 +130,13 @@ function Show-SCModuleList {
     }
     Write-Host ''
     Write-Host 'Default run: system, users, services, network'
-    Write-Host 'Aliases also accept 01..12 and the script file name.'
+    Write-Host 'Aliases also accept 01..13 and the script file name.'
     Write-Host 'Run every ready module: .\Run-SystemChecker.ps1 -All'
     Write-Host '                      .\Run-SystemChecker.ps1 -Modules all'
     Write-Host 'If -All and -Modules are both set, -All wins.'
     Write-Host 'HTML report: .\Run-SystemChecker.ps1 -Html .\report.html'
     Write-Host '             .\Export-SystemCheckerHtml.ps1 -Log .\systemchecker.log -Out .\report.html'
-    Write-Host 'files, browser, events, cloud, and ad are not part of the default run.'
+    Write-Host 'files, browser, events, cloud, ad, and hardening are not part of the default run.'
 }
 
 function Get-SCReadyCatalog {
