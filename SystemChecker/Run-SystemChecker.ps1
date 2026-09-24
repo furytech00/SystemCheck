@@ -67,7 +67,7 @@ function Get-SCCatalog {
         @{ Name = 'services';  File = '04_services.ps1';     Status = 'ready'; Purpose = 'Service configuration and path checks' }
         @{ Name = 'apps';      File = '05_applications.ps1'; Status = 'ready'; Purpose = 'Installed application inventory' }
         @{ Name = 'network';   File = '06_network.ps1';      Status = 'ready'; Purpose = 'Listeners, shares, and firewall profile' }
-        @{ Name = 'creds';     File = '07_credentials.ps1';  Status = 'stub';  Purpose = 'Credential-related configuration only' }
+        @{ Name = 'creds';     File = '07_credentials.ps1';  Status = 'ready'; Purpose = 'Credential names and leftover paths' }
         @{ Name = 'files';     File = '08_files.ps1';        Status = 'stub';  Purpose = 'Optional file and folder review' }
         @{ Name = 'browser';   File = '09_browser.ps1';      Status = 'stub';  Purpose = 'Browser presence, not stored secrets' }
         @{ Name = 'events';    File = '10_events.ps1';       Status = 'stub';  Purpose = 'Optional event-log summary' }
