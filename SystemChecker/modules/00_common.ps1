@@ -469,11 +469,25 @@ function New-SCAclResult {
     }
 }
 
+function Test-SCStringInList {
+    # Windows PowerShell 5.1 binds -contains on List[string] to Contains(T)
+    # and throws "Argument types do not match". Compare the strings directly.
+    param($List, [string]$Value)
+    if ($null -eq $List) { return $false }
+    foreach ($item in $List) {
+        if ($null -eq $item) { continue }
+        if ([string]::Equals([string]$item, $Value, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Add-SCWritePrincipal {
     param($Bag, [string]$Identity, [bool]$Broad)
     if (-not $Identity) { return }
-    if ($Bag.NonAdmin -notcontains $Identity) { [void]$Bag.NonAdmin.Add($Identity) }
-    if ($Broad -and ($Bag.Broad -notcontains $Identity)) { [void]$Bag.Broad.Add($Identity) }
+    if (-not (Test-SCStringInList -List $Bag.NonAdmin -Value $Identity)) { [void]$Bag.NonAdmin.Add($Identity) }
+    if ($Broad -and -not (Test-SCStringInList -List $Bag.Broad -Value $Identity)) { [void]$Bag.Broad.Add($Identity) }
 }
 
 function Get-SCFileAclSummary {
