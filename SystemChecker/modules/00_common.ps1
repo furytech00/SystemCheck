@@ -54,6 +54,34 @@ $script:SCSectionOpen = $false
 $script:SCSectionCount = 0
 $script:SCContextCache = $null
 
+# Report rows live in global scope so a module invoked with & can append
+# to the same list the runner started. Dot-sourcing this file must not
+# clear that list. Reset-SCReport does, and only the runner calls it.
+if (-not (Test-Path -Path 'variable:global:SCReportMetaSet')) {
+    $global:SCReportMetaSet = $false
+}
+if (-not (Test-Path -Path 'variable:global:SCReportModule')) {
+    $global:SCReportModule = ''
+}
+if (-not (Test-Path -Path 'variable:global:SCReportSection')) {
+    $global:SCReportSection = ''
+}
+if (-not (Test-Path -Path 'variable:global:SCReportComputer')) {
+    $global:SCReportComputer = ''
+}
+if (-not (Test-Path -Path 'variable:global:SCReportUser')) {
+    $global:SCReportUser = ''
+}
+if (-not (Test-Path -Path 'variable:global:SCReportTime')) {
+    $global:SCReportTime = ''
+}
+if (-not (Test-Path -Path 'variable:global:SCReportAdmin')) {
+    $global:SCReportAdmin = ''
+}
+if (-not (Test-Path -Path 'variable:global:SCReportFindings')) {
+    $global:SCReportFindings = New-Object System.Collections.Generic.List[object]
+}
+
 function Test-SCPlainMode {
     # True when the operator asked for text without ANSI color.
     if ($script:SCPlain) { return $true }
@@ -147,15 +175,26 @@ function Write-SCHeader {
     foreach ($line in $lines) {
         Write-SCLine -Text $line -Style Header
     }
+    $global:SCReportModule = $Title
+    $global:SCReportSection = ''
+    if (-not $global:SCReportMetaSet) {
+        $global:SCReportComputer = [string]$ctx.ComputerName
+        $global:SCReportUser = [string]$ctx.UserName
+        $global:SCReportTime = $stamp
+        $global:SCReportAdmin = $adminText
+        $global:SCReportMetaSet = $true
+    }
 }
 
 function Start-SCSection {
     param([Parameter(Mandatory = $true)][string]$Title)
     if ($script:SCSectionOpen -and $script:SCSectionCount -eq 0) {
         Write-SCLine -Text 'Nothing notable' -Style Dim
+        Add-SCReportFinding -Label 'INFO' -Message 'Nothing notable'
     }
     Write-SCLine -Text ''
     Write-SCLine -Text ("---- {0} ----" -f $Title) -Style Section
+    $global:SCReportSection = $Title
     $script:SCSectionOpen = $true
     $script:SCSectionCount = 0
 }
@@ -165,6 +204,7 @@ function Complete-SCSection {
     if (-not $script:SCSectionOpen) { return }
     if ($script:SCSectionCount -eq 0) {
         Write-SCLine -Text 'Nothing notable' -Style Dim
+        Add-SCReportFinding -Label 'INFO' -Message 'Nothing notable'
     }
     $script:SCSectionOpen = $false
     $script:SCSectionCount = 0
@@ -178,6 +218,7 @@ function Write-SCFinding {
     )
     $script:SCSectionCount = [int]$script:SCSectionCount + 1
     Write-SCLine -Text ("[{0}] {1}" -f $Label, $Message) -Style $Style
+    Add-SCReportFinding -Label $Label -Message $Message
 }
 
 function Write-SCInfo {
@@ -703,6 +744,345 @@ function Invoke-SCNative {
             Error    = $_.Exception.Message
         }
     }
+}
+
+function Reset-SCReport {
+    # Drop buffered rows from an earlier run in this process.
+    $global:SCReportFindings = New-Object System.Collections.Generic.List[object]
+    $global:SCReportModule = ''
+    $global:SCReportSection = ''
+    $global:SCReportComputer = ''
+    $global:SCReportUser = ''
+    $global:SCReportTime = ''
+    $global:SCReportAdmin = ''
+    $global:SCReportMetaSet = $false
+}
+
+function Add-SCReportFinding {
+    param(
+        [string]$Label,
+        [string]$Message,
+        [string]$Module,
+        [string]$Section
+    )
+    # Buffering must not change a check's result or its console text.
+    try {
+        if (-not (Test-Path -Path 'variable:global:SCReportFindings')) {
+            $global:SCReportFindings = New-Object System.Collections.Generic.List[object]
+        }
+        $mod = $Module
+        if ([string]::IsNullOrWhiteSpace($mod)) { $mod = [string]$global:SCReportModule }
+        $sec = $Section
+        if ([string]::IsNullOrWhiteSpace($sec)) { $sec = [string]$global:SCReportSection }
+        $row = New-Object psobject -Property @{
+            Module  = $mod
+            Section = $sec
+            Label   = $Label
+            Message = $Message
+        }
+        [void]$global:SCReportFindings.Add($row)
+    } catch {
+        # The console line was already written. A report buffer miss is not a failed check.
+    }
+}
+
+function ConvertTo-SCHtmlText {
+    param([string]$Text)
+    if ($null -eq $Text) { return '' }
+    $encoded = [string]$Text
+    $encoded = $encoded.Replace('&', '&amp;')
+    $encoded = $encoded.Replace('<', '&lt;')
+    $encoded = $encoded.Replace('>', '&gt;')
+    $encoded = $encoded.Replace('"', '&quot;')
+    return $encoded
+}
+
+function ConvertFrom-SCReportLog {
+    <#
+        .SYNOPSIS
+            Parse a plain SystemChecker transcript into report rows.
+    #>
+    param([string]$Text)
+    $findings = New-Object System.Collections.Generic.List[object]
+    $result = New-Object psobject -Property @{
+        Computer = ''
+        User     = ''
+        Time     = ''
+        Admin    = ''
+        Findings = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        $result.Findings = @()
+        return $result
+    }
+    $module = ''
+    $section = ''
+    $haveMeta = $false
+    $lines = $Text -split "`r`n|`n|`r"
+    foreach ($raw in $lines) {
+        $line = [string]$raw
+        if ($line -match '^ SystemChecker :: (.+)$') {
+            $module = $Matches[1].Trim()
+            $section = ''
+            continue
+        }
+        if (-not $haveMeta -and $line -match '^ Computer\s+: (.*)$') {
+            $result.Computer = $Matches[1].Trim()
+            continue
+        }
+        if (-not $haveMeta -and $line -match '^ User\s+: (.*)$') {
+            $result.User = $Matches[1].Trim()
+            continue
+        }
+        if (-not $haveMeta -and $line -match '^ Time\s+: (.*)$') {
+            $result.Time = $Matches[1].Trim()
+            continue
+        }
+        if (-not $haveMeta -and $line -match '^ Admin\s+: (.*)$') {
+            $result.Admin = $Matches[1].Trim()
+            $haveMeta = $true
+            continue
+        }
+        if ($line -match '^---- (.+) ----$') {
+            $section = $Matches[1].Trim()
+            continue
+        }
+        if ($line -match '^\[(INFO|REVIEW|WEAK|WARN)\] (.*)$') {
+            $row = New-Object psobject -Property @{
+                Module  = $module
+                Section = $section
+                Label   = $Matches[1]
+                Message = $Matches[2]
+            }
+            [void]$findings.Add($row)
+            continue
+        }
+        if ($line -eq 'Nothing notable') {
+            $row = New-Object psobject -Property @{
+                Module  = $module
+                Section = $section
+                Label   = 'INFO'
+                Message = 'Nothing notable'
+            }
+            [void]$findings.Add($row)
+        }
+    }
+    $result.Findings = @($findings.ToArray())
+    return $result
+}
+
+function Get-SCHtmlStyle {
+    # Inline only. No remote fonts, scripts, or images.
+    return @'
+:root {
+  --bg: #f3f5f7;
+  --card: #ffffff;
+  --text: #1b2430;
+  --muted: #5c6b7a;
+  --line: #d5dde6;
+  --info: #0b6e8a;
+  --review: #8a5a00;
+  --weak: #6d3d86;
+  --warn: #9b2331;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Calibri, "Helvetica Neue", sans-serif;
+  line-height: 1.45;
+}
+header, main { max-width: 980px; margin: 0 auto; padding: 28px 20px; }
+header { padding-bottom: 0; }
+h1 { font-size: 1.7rem; margin: 0 0 8px; }
+h2 { font-size: 1.25rem; margin: 0 0 8px; }
+h3 { font-size: 1rem; margin: 16px 0 8px; color: #243140; }
+.meta { margin: 0; color: var(--muted); }
+.note { color: var(--muted); font-size: 0.92rem; }
+.counts { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 16px 0 0; margin: 0; }
+.counts li { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 0.9rem; }
+.counts .info { color: var(--info); }
+.counts .review { color: var(--review); }
+.counts .weak { color: var(--weak); }
+.counts .warn { color: var(--warn); }
+.module { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin: 0 0 16px; padding: 16px 18px 8px; }
+.finding { margin: 0 0 8px; padding: 7px 10px; border-left: 4px solid var(--line); background: #fafbfc; }
+.finding.info { border-color: var(--info); }
+.finding.review { border-color: var(--review); }
+.finding.weak { border-color: var(--weak); }
+.finding.warn { border-color: var(--warn); }
+.tag { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; margin-right: 8px; }
+.finding.info .tag { color: var(--info); }
+.finding.review .tag { color: var(--review); }
+.finding.weak .tag { color: var(--weak); }
+.finding.warn .tag { color: var(--warn); }
+footer { max-width: 980px; margin: 0 auto; padding: 0 20px 28px; color: var(--muted); font-size: 0.85rem; }
+'@
+}
+
+function New-SCHtmlDocument {
+    param(
+        $Findings,
+        [string]$Computer,
+        [string]$User,
+        [string]$Time,
+        [string]$Admin
+    )
+    $counts = @{
+        INFO   = 0
+        REVIEW = 0
+        WEAK   = 0
+        WARN   = 0
+    }
+    $modules = New-Object System.Collections.Generic.List[object]
+    $modulePos = @{}
+    foreach ($row in @($Findings)) {
+        if (-not $row) { continue }
+        $modName = [string]$row.Module
+        if ([string]::IsNullOrWhiteSpace($modName)) { $modName = 'Report' }
+        $secName = [string]$row.Section
+        if ([string]::IsNullOrWhiteSpace($secName)) { $secName = 'General' }
+        $label = ([string]$row.Label).ToUpperInvariant()
+        if (-not $counts.ContainsKey($label)) { $label = 'INFO' }
+        $counts[$label] = [int]$counts[$label] + 1
+
+        if (-not $modulePos.ContainsKey($modName)) {
+            $modulePos[$modName] = $modules.Count
+            [void]$modules.Add((New-Object psobject -Property @{
+                Name     = $modName
+                Sections = (New-Object System.Collections.Generic.List[object])
+                SecPos   = @{}
+            }))
+        }
+        $mod = $modules[$modulePos[$modName]]
+        if (-not $mod.SecPos.ContainsKey($secName)) {
+            $mod.SecPos[$secName] = $mod.Sections.Count
+            [void]$mod.Sections.Add((New-Object psobject -Property @{
+                Name     = $secName
+                Findings = (New-Object System.Collections.Generic.List[object])
+            }))
+        }
+        $sec = $mod.Sections[$mod.SecPos[$secName]]
+        [void]$sec.Findings.Add((New-Object psobject -Property @{
+            Label   = $label
+            Message = [string]$row.Message
+        }))
+    }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('<!DOCTYPE html>')
+    [void]$sb.AppendLine('<html lang="en">')
+    [void]$sb.AppendLine('<head>')
+    [void]$sb.AppendLine('<meta charset="utf-8">')
+    [void]$sb.AppendLine('<meta name="viewport" content="width=device-width, initial-scale=1">')
+    [void]$sb.AppendLine('<title>SystemChecker report</title>')
+    [void]$sb.AppendLine('<style>')
+    [void]$sb.AppendLine((Get-SCHtmlStyle))
+    [void]$sb.AppendLine('</style>')
+    [void]$sb.AppendLine('</head>')
+    [void]$sb.AppendLine('<body>')
+    [void]$sb.AppendLine('<header>')
+    [void]$sb.AppendLine('<h1>SystemChecker</h1>')
+    [void]$sb.AppendLine('<p class="meta">')
+    [void]$sb.Append('Computer ')
+    [void]$sb.Append((ConvertTo-SCHtmlText -Text $Computer))
+    [void]$sb.Append(' · User ')
+    [void]$sb.Append((ConvertTo-SCHtmlText -Text $User))
+    [void]$sb.Append(' · Time ')
+    [void]$sb.Append((ConvertTo-SCHtmlText -Text $Time))
+    [void]$sb.Append(' · Admin ')
+    [void]$sb.Append((ConvertTo-SCHtmlText -Text $Admin))
+    [void]$sb.AppendLine('</p>')
+    [void]$sb.AppendLine('<ul class="counts">')
+    foreach ($name in @('INFO', 'REVIEW', 'WEAK', 'WARN')) {
+        $className = $name.ToLowerInvariant()
+        [void]$sb.Append('<li class="')
+        [void]$sb.Append($className)
+        [void]$sb.Append('">')
+        [void]$sb.Append($name)
+        [void]$sb.Append(' ')
+        [void]$sb.Append([string]$counts[$name])
+        [void]$sb.AppendLine('</li>')
+    }
+    [void]$sb.AppendLine('</ul>')
+    [void]$sb.AppendLine('</header>')
+    [void]$sb.AppendLine('<main>')
+    if ($modules.Count -eq 0) {
+        [void]$sb.AppendLine('<article class="module"><h2>Report</h2><p class="note">No findings were in this report.</p></article>')
+    }
+    foreach ($mod in @($modules.ToArray())) {
+        [void]$sb.AppendLine('<article class="module">')
+        [void]$sb.Append('<h2>')
+        [void]$sb.Append((ConvertTo-SCHtmlText -Text $mod.Name))
+        [void]$sb.AppendLine('</h2>')
+        foreach ($sec in @($mod.Sections.ToArray())) {
+            [void]$sb.Append('<h3>')
+            [void]$sb.Append((ConvertTo-SCHtmlText -Text $sec.Name))
+            [void]$sb.AppendLine('</h3>')
+            foreach ($finding in @($sec.Findings.ToArray())) {
+                $className = ([string]$finding.Label).ToLowerInvariant()
+                [void]$sb.Append('<p class="finding ')
+                [void]$sb.Append($className)
+                [void]$sb.Append('"><span class="tag">')
+                [void]$sb.Append((ConvertTo-SCHtmlText -Text $finding.Label))
+                [void]$sb.Append('</span>')
+                [void]$sb.Append((ConvertTo-SCHtmlText -Text $finding.Message))
+                [void]$sb.AppendLine('</p>')
+            }
+        }
+        [void]$sb.AppendLine('</article>')
+    }
+    [void]$sb.AppendLine('</main>')
+    [void]$sb.AppendLine('<footer>Terminal output is the source of truth. This page is a reading copy of the same findings.</footer>')
+    [void]$sb.AppendLine('</body>')
+    [void]$sb.AppendLine('</html>')
+    return $sb.ToString()
+}
+
+function Export-SCHtmlReport {
+    <#
+        .SYNOPSIS
+            Write one self-contained HTML file. Does not throw.
+    #>
+    param(
+        [string]$Path,
+        $Findings,
+        [string]$Computer,
+        [string]$User,
+        [string]$Time,
+        [string]$Admin
+    )
+    $result = New-Object psobject -Property @{
+        Ok       = $false
+        Error    = ''
+        FullPath = ''
+    }
+    try {
+        if ([string]::IsNullOrWhiteSpace($Path)) {
+            $result.Error = 'HTML path was empty.'
+            return $result
+        }
+        $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        $parent = Split-Path -Parent $resolved
+        if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+            $result.Error = "HTML directory does not exist: $parent"
+            return $result
+        }
+        if ((Test-Path -LiteralPath $resolved) -and (Get-Item -LiteralPath $resolved).PSIsContainer) {
+            $result.Error = "HTML path is a directory: $resolved"
+            return $result
+        }
+        $html = New-SCHtmlDocument -Findings $Findings -Computer $Computer -User $User -Time $Time -Admin $Admin
+        $utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        [System.IO.File]::WriteAllText($resolved, $html, $utf8)
+        $result.Ok = $true
+        $result.FullPath = $resolved
+    } catch {
+        $result.Ok = $false
+        $result.Error = [string]$_.Exception.Message
+    }
+    return $result
 }
 
 function Initialize-SCRuntime {

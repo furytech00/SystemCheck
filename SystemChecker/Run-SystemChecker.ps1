@@ -12,12 +12,20 @@
     Aliases to run. Accepts a comma-separated string or repeated values.
     Aliases: system, users, processes, services, apps, network, creds,
     files, browser, events, cloud, ad. Numeric prefixes such as 01 also work.
+    The token "all" selects every ready module.
+
+.PARAMETER All
+    Run every ready module. If -Modules is also set, -All wins.
 
 .PARAMETER Plain
     Disable ANSI color. Sets $script:SCPlain for this process.
 
 .PARAMETER Log
     Append a plain-text transcript to this path. No file is written without it.
+
+.PARAMETER Html
+    Write a self-contained HTML report to this path after the run.
+    No file is written without it.
 
 .PARAMETER List
     Print the module catalog and exit.
@@ -29,10 +37,19 @@
     .\Run-SystemChecker.ps1 -Modules system,users,services
 
 .EXAMPLE
+    .\Run-SystemChecker.ps1 -All
+
+.EXAMPLE
+    .\Run-SystemChecker.ps1 -Modules all
+
+.EXAMPLE
     .\Run-SystemChecker.ps1 -Plain
 
 .EXAMPLE
     .\Run-SystemChecker.ps1 -Log .\systemchecker.log
+
+.EXAMPLE
+    .\Run-SystemChecker.ps1 -Html .\report.html
 
 .EXAMPLE
     .\Run-SystemChecker.ps1 -List
@@ -41,8 +58,10 @@
 param(
     [Alias('Module')]
     [string[]]$Modules,
+    [switch]$All,
     [switch]$Plain,
     [string]$Log,
+    [string]$Html,
     [switch]$List
 )
 
@@ -111,7 +130,22 @@ function Show-SCModuleList {
     Write-Host ''
     Write-Host 'Default run: system, users, services, network'
     Write-Host 'Aliases also accept 01..12 and the script file name.'
+    Write-Host 'Run every ready module: .\Run-SystemChecker.ps1 -All'
+    Write-Host '                      .\Run-SystemChecker.ps1 -Modules all'
+    Write-Host 'If -All and -Modules are both set, -All wins.'
+    Write-Host 'HTML report: .\Run-SystemChecker.ps1 -Html .\report.html'
+    Write-Host '             .\Export-SystemCheckerHtml.ps1 -Log .\systemchecker.log -Out .\report.html'
     Write-Host 'files, browser, events, cloud, and ad are not part of the default run.'
+}
+
+function Get-SCReadyCatalog {
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @(Get-SCCatalog)) {
+        if ([string]$item.Status -eq 'ready') { [void]$list.Add($item) }
+    }
+    return New-Object psobject -Property @{
+        Items = @($list.ToArray())
+    }
 }
 
 function Resolve-SCSelection {
@@ -129,7 +163,12 @@ function Resolve-SCSelection {
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = @{}
     $unknown = New-Object System.Collections.Generic.List[string]
+    $usedAll = $false
     foreach ($token in $tokens) {
+        if ($token.Trim().ToLower() -eq 'all') {
+            $usedAll = $true
+            continue
+        }
         $match = Find-SCModule -Token $token -Catalog $catalog
         if (-not $match) {
             [void]$unknown.Add($token)
@@ -139,9 +178,49 @@ function Resolve-SCSelection {
         $seen[$match.Name] = $true
         [void]$selected.Add($match)
     }
+    if ($usedAll -and @($unknown.ToArray()).Count -eq 0) {
+        $ready = Get-SCReadyCatalog
+        return New-Object psobject -Property @{
+            Selected = @($ready.Items)
+            Unknown  = @()
+            UsedAll  = $true
+        }
+    }
     return New-Object psobject -Property @{
         Selected = @($selected.ToArray())
         Unknown  = @($unknown.ToArray())
+        UsedAll  = $usedAll
+    }
+}
+
+function Get-SCRunPlan {
+    param(
+        [switch]$All,
+        [switch]$ModulesSpecified,
+        [string[]]$Modules
+    )
+    if ($All) {
+        $ready = Get-SCReadyCatalog
+        return New-Object psobject -Property @{
+            Selected = @($ready.Items)
+            Unknown  = @()
+            Override = [bool]$ModulesSpecified
+            Mode     = 'all'
+        }
+    }
+    $requested = $Modules
+    $mode = 'named'
+    if (-not $ModulesSpecified) {
+        $requested = @('system', 'users', 'services', 'network')
+        $mode = 'default'
+    }
+    $selection = Resolve-SCSelection -Requested $requested
+    if ($selection.UsedAll -and @($selection.Unknown).Count -eq 0) { $mode = 'all' }
+    return New-Object psobject -Property @{
+        Selected = @($selection.Selected)
+        Unknown  = @($selection.Unknown)
+        Override = $false
+        Mode     = $mode
     }
 }
 
@@ -150,23 +229,19 @@ if ($List) {
     exit 0
 }
 
-$requested = $Modules
-if (-not $PSBoundParameters.ContainsKey('Modules')) {
-    $requested = @('system', 'users', 'services', 'network')
-}
-
-$selection = Resolve-SCSelection -Requested $requested
-if (@($selection.Unknown).Count -gt 0) {
-    Write-Host ("Unknown module: {0}" -f ($selection.Unknown -join ', '))
+$modulesSpecified = $PSBoundParameters.ContainsKey('Modules')
+$plan = Get-SCRunPlan -All:$All -ModulesSpecified:$modulesSpecified -Modules $Modules
+if (@($plan.Unknown).Count -gt 0) {
+    Write-Host ("Unknown module: {0}" -f ($plan.Unknown -join ', '))
     Write-Host 'Run .\Run-SystemChecker.ps1 -List for aliases.'
     exit 1
 }
-if (@($selection.Selected).Count -eq 0) {
+if (@($plan.Selected).Count -eq 0) {
     Write-Host 'No modules selected. Run .\Run-SystemChecker.ps1 -List for aliases.'
     exit 1
 }
 
-foreach ($item in @($selection.Selected)) {
+foreach ($item in @($plan.Selected)) {
     $full = Join-Path $moduleDir $item.File
     if (-not (Test-Path -LiteralPath $full)) {
         Write-Host ("Missing module file: {0}" -f $full)
@@ -174,13 +249,17 @@ foreach ($item in @($selection.Selected)) {
     }
 }
 
+Reset-SCReport
 Initialize-SCRuntime -Plain:$Plain -LogPath $Log
 
 $names = New-Object System.Collections.Generic.List[string]
-foreach ($item in @($selection.Selected)) { [void]$names.Add([string]$item.Name) }
+foreach ($item in @($plan.Selected)) { [void]$names.Add([string]$item.Name) }
 Write-SCHeader -Title 'Runner'
 Start-SCSection -Title 'Run'
 Write-SCInfo -Message ("Selected modules: {0}" -f ($names -join ', '))
+if ($plan.Override) {
+    Write-SCInfo -Message '-All overrides -Modules. Every ready module was selected.'
+}
 if ($Plain) {
     Write-SCInfo -Message 'Plain output: ANSI color is off.'
 }
@@ -191,7 +270,7 @@ Complete-SCSection
 
 $env:SYSTEMCHECKER_NESTED = '1'
 try {
-    foreach ($item in @($selection.Selected)) {
+    foreach ($item in @($plan.Selected)) {
         $full = Join-Path $moduleDir $item.File
         try {
             # Call, do not dot-source. A module's top-level return must not unwind the runner.
@@ -208,4 +287,26 @@ try {
 
 Write-SCLine -Text ''
 Write-SCLine -Text 'SystemChecker finished.' -Style Dim
+
+if (-not [string]::IsNullOrWhiteSpace($Html)) {
+    $htmlResult = $null
+    try {
+        $rows = @()
+        if ($global:SCReportFindings) { $rows = $global:SCReportFindings.ToArray() }
+        $htmlResult = Export-SCHtmlReport -Path $Html -Findings $rows -Computer $global:SCReportComputer -User $global:SCReportUser -Time $global:SCReportTime -Admin $global:SCReportAdmin
+    } catch {
+        $htmlResult = New-Object psobject -Property @{
+            Ok       = $false
+            Error    = [string]$_.Exception.Message
+            FullPath = ''
+        }
+    }
+    if ($htmlResult -and $htmlResult.Ok) {
+        Write-SCLine -Text ("HTML report: {0}" -f $htmlResult.FullPath) -Style Dim
+    } else {
+        $detail = 'HTML report was not written.'
+        if ($htmlResult -and $htmlResult.Error) { $detail = $htmlResult.Error }
+        Write-SCWarn -Message ("HTML report was not written: {0}" -f $detail)
+    }
+}
 exit 0

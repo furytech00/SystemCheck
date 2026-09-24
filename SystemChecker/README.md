@@ -37,8 +37,11 @@ Runner (several modules in one process):
 ```powershell
 .\Run-SystemChecker.ps1
 .\Run-SystemChecker.ps1 -Modules system,users,services
+.\Run-SystemChecker.ps1 -All
+.\Run-SystemChecker.ps1 -Modules all
 .\Run-SystemChecker.ps1 -Plain
 .\Run-SystemChecker.ps1 -Log .\systemchecker.log
+.\Run-SystemChecker.ps1 -Html .\report.html
 .\Run-SystemChecker.ps1 -List
 ```
 
@@ -61,7 +64,26 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\modules\12_ad_optional
 
 `-Plain` turns ANSI color off. Color is on by default. `-Log` appends the same text without color codes. Console text uses `Write-Host`, so shell redirection is not a substitute for `-Log`.
 
-The default runner selection is `system`, `users`, `services`, and `network`. File searches, event-log sweeps, cloud guest-agent checks, and Active Directory context checks are not in the default set.
+`-All` runs every ready module. `-Modules all` does the same. If both `-All` and `-Modules` are set, `-All` wins and any names passed to `-Modules` are ignored. A list that includes the token `all` also selects every ready module. An unknown name next to `all` is still rejected. The default runner selection is `system`, `users`, `services`, and `network`. File searches, event-log sweeps, cloud guest-agent checks, and Active Directory context checks are not in the default set.
+
+## HTML report
+
+The terminal report stays the source of truth. HTML is a separate reading copy. Nothing is written unless you pass a path.
+
+During a run, `-Html` writes one self-contained file (inline CSS, no network) from the findings just collected:
+
+```powershell
+.\Run-SystemChecker.ps1 -Html .\report.html
+.\Run-SystemChecker.ps1 -All -Log .\systemchecker.log -Html .\report.html
+```
+
+An existing plain log can be converted without running the checks again:
+
+```powershell
+.\Export-SystemCheckerHtml.ps1 -Log .\systemchecker.log -Out .\report.html
+```
+
+The page groups INFO, REVIEW, WEAK, and WARN lines under the same module and section headings as the transcript. A missing directory or a bad path prints a warning and does not fail the assessment. The converter exits 1 when it cannot read the log or write the file.
 
 ## Modules
 
