@@ -65,7 +65,7 @@ function Get-SCCatalog {
         @{ Name = 'users';     File = '02_users_tokens.ps1'; Status = 'ready'; Purpose = 'Accounts, groups, and privilege names' }
         @{ Name = 'processes'; File = '03_processes.ps1';    Status = 'ready'; Purpose = 'Process inventory' }
         @{ Name = 'services';  File = '04_services.ps1';     Status = 'ready'; Purpose = 'Service configuration and path checks' }
-        @{ Name = 'apps';      File = '05_applications.ps1'; Status = 'stub';  Purpose = 'Installed application inventory' }
+        @{ Name = 'apps';      File = '05_applications.ps1'; Status = 'ready'; Purpose = 'Installed application inventory' }
         @{ Name = 'network';   File = '06_network.ps1';      Status = 'ready'; Purpose = 'Listeners, shares, and firewall profile' }
         @{ Name = 'creds';     File = '07_credentials.ps1';  Status = 'stub';  Purpose = 'Credential-related configuration only' }
         @{ Name = 'files';     File = '08_files.ps1';        Status = 'stub';  Purpose = 'Optional file and folder review' }
