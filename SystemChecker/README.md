@@ -123,6 +123,8 @@ Each module prints a banner: module name, computer, user, timestamp, and whether
 
 An empty subsection prints `Nothing notable`.
 
+Unquoted service, task, and Run paths are WEAK or REVIEW only when a path prefix or the executable is writable by a non-admin. Microsoft platform paths (Windows, Defender, Office, Intune, Autopatch, and `Program Files\Windows*`) with no such write are not listed. LocalSystem, LocalService, and NetworkService are not reported as user-account services. CREATOR OWNER alone on Windows and Program Files paths is not treated as a non-admin write.
+
 Servicing notes compare the installed build with published lifecycle dates only. They are not a vulnerability map and they do not describe exploits.
 
 ## Adding the next module
