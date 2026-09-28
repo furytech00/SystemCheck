@@ -422,6 +422,116 @@ function Test-SCBroadIdentity {
     return $false
 }
 
+function Get-SCNormalizedWindowsPath {
+    # Compare Windows paths as text. Do not touch the disk.
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $text = $Path.Trim().Replace('/', '\')
+    if ($text.StartsWith('\\?\')) { $text = $text.Substring(4) }
+    return $text.ToLowerInvariant()
+}
+
+function Test-SCNormalizedPathPrefix {
+    # $RequireBoundary is untyped. Windows PowerShell 5.1 mis-binds
+    # -RequireBoundary (expression) on a [bool] parameter.
+    param(
+        [string]$Normalized,
+        [string]$Prefix,
+        $RequireBoundary
+    )
+    if (-not $Normalized -or -not $Prefix) { return $false }
+    $idx = $Normalized.IndexOf($Prefix)
+    while ($idx -ge 0) {
+        $end = $idx + $Prefix.Length
+        $boundary = ($RequireBoundary -eq $true)
+        if (-not $boundary -or $end -ge $Normalized.Length -or $Normalized[$end] -eq '\') {
+            return $true
+        }
+        if ($end -ge $Normalized.Length) { return $false }
+        $idx = $Normalized.IndexOf($Prefix, $end)
+    }
+    return $false
+}
+
+function Test-SCCreatorOwnerIdentity {
+    # CREATOR OWNER (S-1-3-0) is an inherit-only placeholder, not a current writer.
+    param([string]$Sid, [string]$Name)
+    if ($Sid -and [string]::Equals($Sid, 'S-1-3-0', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    if ($Name) {
+        $leaf = $Name
+        if ($Name.Contains('\')) {
+            $pieces = $Name.Split('\')
+            $leaf = $pieces[$pieces.Length - 1]
+        }
+        if ([string]::Equals($leaf, 'CREATOR OWNER', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-SCProtectedSystemPath {
+    # Windows and Program Files trees, including PATH entries under them.
+    # C:\Windows.old and profile folders are not in this set.
+    param([string]$Path)
+    $text = Get-SCNormalizedWindowsPath -Path $Path
+    if (-not $text) { return $false }
+    if ($text -match '^[a-z]:\\windows($|\\)') { return $true }
+    if ($text -match '^[a-z]:\\program files($|\\)') { return $true }
+    if ($text -match '^[a-z]:\\program files \(x86\)($|\\)') { return $true }
+    return $false
+}
+
+function Test-SCIgnoreCreatorOwnerWrite {
+    param([string]$Path, [string]$Sid, [string]$Name)
+    if (-not (Test-SCCreatorOwnerIdentity -Sid $Sid -Name $Name)) { return $false }
+    return (Test-SCProtectedSystemPath -Path $Path)
+}
+
+function Test-SCMicrosoftPlatformPath {
+    <#
+        .SYNOPSIS
+            True when a path is under a known Microsoft platform directory.
+        .DESCRIPTION
+            Used to skip unquoted-path noise for Windows, Defender, Defender ATP,
+            Office, Intune, and Autopatch. This is a prefix list, not an ACL
+            result. ProgramData is not treated as writable. A writable prefix
+            or executable is still reported by the caller.
+    #>
+    param([string]$Path)
+    $text = Get-SCNormalizedWindowsPath -Path $Path
+    if (-not $text) { return $false }
+    # Complete directory name. Does not match Windows.old.
+    if (Test-SCNormalizedPathPrefix -Normalized $text -Prefix ':\windows' -RequireBoundary:$true) {
+        return $true
+    }
+    # Program Files\Windows* (Defender, Defender ATP, Autopatch, WindowsApps).
+    # Named vendor trees are listed on their own. Program Files\Microsoft is not.
+    $heads = @(
+        ':\program files\windows',
+        ':\program files (x86)\windows',
+        ':\program files\microsoft office',
+        ':\program files (x86)\microsoft office',
+        ':\program files\common files\microsoft shared',
+        ':\program files (x86)\common files\microsoft shared',
+        ':\program files\microsoft intune management extension',
+        ':\program files (x86)\microsoft intune management extension',
+        ':\program files\microsoft defender',
+        ':\program files (x86)\microsoft defender',
+        ':\programdata\microsoft\windows defender',
+        ':\programdata\microsoft\windows defender advanced threat protection',
+        ':\programdata\microsoft\autopatch'
+    )
+    foreach ($prefix in $heads) {
+        if (Test-SCNormalizedPathPrefix -Normalized $text -Prefix $prefix -RequireBoundary:$false) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Test-SCFileWriteMask {
     param($Rights)
     # Write-oriented file bits. This is an ACL flag test, not effective access.
@@ -539,7 +649,8 @@ function Get-SCFileAclSummary {
             $isAllow = ($ace.AccessControlType.ToString() -eq 'Allow')
             $isPrivileged = Test-SCPrivilegedIdentity -Sid $sid -Name $identity
             $isBroad = Test-SCBroadIdentity -Sid $sid -Name $identity
-            if ($isAllow -and $isWrite -and -not $isPrivileged) {
+            $ignoreCreator = Test-SCIgnoreCreatorOwnerWrite -Path $Path -Sid $sid -Name $identity
+            if ($isAllow -and $isWrite -and -not $isPrivileged -and -not $ignoreCreator) {
                 Add-SCWritePrincipal -Bag $writers -Identity $identity -Broad $isBroad
             }
             if ($display.Count -ge 40) {

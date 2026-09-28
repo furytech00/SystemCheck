@@ -52,7 +52,7 @@ function Write-SCLevel {
 
 function Write-SCFindingItems {
     param($Items)
-    foreach ($item in @($Items)) {
+    foreach ($item in (ConvertTo-SCArray $Items)) {
         if (-not $item) { continue }
         Write-SCLevel -Level ([string]$item.Level) -Message ([string]$item.Text)
     }
@@ -983,26 +983,32 @@ function Write-SCProfileAcl {
     $owner = [string]$summary.Owner
     if (-not $owner) { $owner = 'unknown' }
     Write-SCInfo -Message ("Profile {0} owner {1}" -f $Path, $owner)
-    $broad = @()
-    if ($summary.BroadWritePrincipals) { $broad = @($summary.BroadWritePrincipals) }
+    $broad = ConvertTo-SCArray $summary.BroadWritePrincipals
     if ($broad.Count -gt 0) {
-        $sample = @($broad | Select-Object -First 5)
-        Write-SCReview -Message ("Profile {0} is writable by a broad principal: {1}" -f $Path, ($sample -join ', '))
+        $sample = New-Object System.Collections.Generic.List[string]
+        foreach ($name in $broad) {
+            if ($sample.Count -ge 5) { break }
+            if ($name) { [void]$sample.Add([string]$name) }
+        }
+        Write-SCReview -Message ("Profile {0} is writable by a broad principal: {1}" -f $Path, ($sample.ToArray() -join ', '))
     }
     if (-not $Current) {
-        $writers = @()
-        if ($summary.NonAdminWritePrincipals) { $writers = @($summary.NonAdminWritePrincipals) }
+        $writers = ConvertTo-SCArray $summary.NonAdminWritePrincipals
         $extra = New-Object System.Collections.Generic.List[string]
         foreach ($writer in $writers) {
             $text = [string]$writer
             if (-not $text) { continue }
-            if ($broad -contains $text) { continue }
+            if (Test-SCStringInList -List $broad -Value $text) { continue }
             if ($owner -eq $text) { continue }
             [void]$extra.Add($text)
         }
         if ($extra.Count -gt 0) {
-            $sample = @($extra | Select-Object -First 5)
-            Write-SCReview -Message ("Profile {0} is writable by a non-admin principal: {1}" -f $Path, ($sample -join ', '))
+            $sample = New-Object System.Collections.Generic.List[string]
+            foreach ($name in $extra) {
+                if ($sample.Count -ge 5) { break }
+                [void]$sample.Add([string]$name)
+            }
+            Write-SCReview -Message ("Profile {0} is writable by a non-admin principal: {1}" -f $Path, ($sample.ToArray() -join ', '))
         }
     }
     return 'ok'
@@ -1047,7 +1053,7 @@ function Invoke-SCCheckProfiles {
     $current = $env:USERPROFILE
     if ($current) {
         $already = $false
-        foreach ($entry in @($paths)) {
+        foreach ($entry in $paths) {
             if (Test-SCSamePath -Left $current -Right ([string]$entry.Path)) { $already = $true }
         }
         if (-not $already) {
@@ -1062,7 +1068,7 @@ function Invoke-SCCheckProfiles {
     }
     $checked = 0
     $missing = 0
-    foreach ($entry in @($paths)) {
+    foreach ($entry in $paths) {
         if ($checked -ge 15) { break }
         $path = [string]$entry.Path
         if (-not $path) { continue }

@@ -263,11 +263,26 @@ function Format-SCStartMode {
 }
 
 function Test-SCServiceAccountBuiltin {
+    # LocalSystem, LocalService, and NetworkService are built-in service
+    # accounts. Win32_Service uses NT AUTHORITY\LocalService with no space.
+    # A domain or local user account, including IIS APPPOOL\, is not built-in.
     param([string]$Account)
     if ([string]::IsNullOrWhiteSpace($Account)) { return $true }
     $text = $Account.Trim()
-    if ($text -match '(?i)^(LocalSystem|NT AUTHORITY\\SYSTEM|NT AUTHORITY\\LOCAL SERVICE|NT AUTHORITY\\NETWORK SERVICE|LOCAL SERVICE|NETWORK SERVICE)$') {
-        return $true
+    $compact = ($text -replace '\s+', '').ToLowerInvariant()
+    $known = @(
+        'localsystem',
+        'ntauthority\system',
+        'ntauthority\localservice',
+        'ntauthority\networkservice',
+        'localservice',
+        'networkservice',
+        's-1-5-18',
+        's-1-5-19',
+        's-1-5-20'
+    )
+    foreach ($item in $known) {
+        if ($compact -eq $item) { return $true }
     }
     if ($text -match '(?i)^NT SERVICE\\') { return $true }
     return $false
@@ -459,6 +474,81 @@ function Get-SCCachedWrite {
     $info = Test-SCWritableByNonAdmin -Path $Path
     $Cache[$key] = $info
     return $info
+}
+
+function Get-SCUnquotedLevel {
+    # Empty string means do not report. WEAK or REVIEW only when a concrete
+    # path is writable by a non-admin. Allowlisted Microsoft platform paths
+    # with no such write are skipped. Locked or unconfirmed ACLs are INFO.
+    param(
+        [string]$Command,
+        $Cache
+    )
+    if (-not (Test-SCUnquotedPath -Path $Command)) { return '' }
+    $best = ''
+    $exeRaw = Get-SCCommandExecutable -Command $Command
+    $exe = $null
+    if ($exeRaw) { $exe = Expand-SCSystemPath -Path $exeRaw }
+    $trimmed = $Command.Trim()
+    $prefix = $null
+    $spaceAt = $trimmed.IndexOf(' ')
+    if ($spaceAt -gt 0) {
+        $prefix = Expand-SCSystemPath -Path $trimmed.Substring(0, $spaceAt)
+    }
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($prefix) { [void]$candidates.Add([string]$prefix) }
+    if ($exe) { [void]$candidates.Add([string]$exe) }
+    if ($exe) {
+        $parent = Get-SCParentPath -Path $exe
+        if ($parent) { [void]$candidates.Add([string]$parent) }
+    }
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if (Test-SCUncPath -Path $candidate) { continue }
+        $exists = $false
+        try { $exists = [bool](Test-Path -LiteralPath $candidate -ErrorAction SilentlyContinue) } catch { $exists = $false }
+        if (-not $exists) { continue }
+        $info = $null
+        if ($Cache) { $info = Get-SCCachedWrite -Cache $Cache -Path $candidate }
+        else { $info = Test-SCWritableByNonAdmin -Path $candidate }
+        $level = Get-SCNonAdminWriteLevel -Info $info
+        if ($level.Level -eq 'WEAK') { return 'WEAK' }
+        if ($level.Level -eq 'REVIEW') { $best = 'REVIEW' }
+    }
+    if ($best -eq 'REVIEW') { return 'REVIEW' }
+    $platformProbe = $exe
+    if (-not $platformProbe) { $platformProbe = $trimmed }
+    if ($platformProbe -and (Test-SCMicrosoftPlatformPath -Path $platformProbe)) { return '' }
+    if ($prefix -and (Test-SCMicrosoftPlatformPath -Path $prefix)) { return '' }
+    return 'INFO'
+}
+
+function Format-SCUnquotedFindingText {
+    param([string]$Level, [string]$Subject, [string]$Shown)
+    if ($Level -eq 'WEAK') {
+        return ("{0} is unquoted and contains a space. A path prefix or the executable is writable by a broad principal. Executable: {1}" -f $Subject, $Shown)
+    }
+    if ($Level -eq 'REVIEW') {
+        return ("{0} is unquoted and contains a space. A path prefix or the executable is writable by a non-admin principal. Executable: {1}" -f $Subject, $Shown)
+    }
+    return ("{0} is unquoted and contains a space. No non-admin write was confirmed for the path or executable. Executable: {1}" -f $Subject, $Shown)
+}
+
+function Add-SCUnquotedFinding {
+    param(
+        $Extra,
+        [string]$Subject,
+        [string]$Command,
+        $Cache
+    )
+    $level = Get-SCUnquotedLevel -Command $Command -Cache $Cache
+    if (-not $level) { return $false }
+    $shown = 'not parsed'
+    $exeOnly = Get-SCCommandExecutable -Command $Command
+    if ($exeOnly) { $shown = Format-SCShortText -Text $exeOnly -Max 120 }
+    $text = Format-SCUnquotedFindingText -Level $level -Subject $Subject -Shown $shown
+    [void]$Extra.Add((New-SCFinding -Level $level -Text $text))
+    return $true
 }
 
 function Add-SCGroupedWrite {
@@ -814,11 +904,8 @@ function Invoke-SCCheckServices {
             if ([string]::IsNullOrWhiteSpace($image)) {
                 $emptyImage++
             } else {
-                if (Test-SCUnquotedPath -Path $image) {
-                    $exeOnly = Get-SCCommandExecutable -Command $image
-                    $shown = 'not parsed'
-                    if ($exeOnly) { $shown = Format-SCShortText -Text $exeOnly -Max 120 }
-                    [void]$extra.Add((New-SCFinding -Level 'WEAK' -Text ("Service '{0}' ImagePath is unquoted and contains a space. Executable: {1}" -f $svc.Name, $shown)))
+                $subject = "Service '{0}' ImagePath" -f $svc.Name
+                if (Add-SCUnquotedFinding -Extra $extra -Subject $subject -Command $image -Cache $pathCache) {
                     $hadFinding = $true
                 }
             }
@@ -1166,11 +1253,11 @@ function Invoke-SCCheckTasks {
             foreach ($action in (ConvertTo-SCArray $task.Actions)) {
                 if (-not $action) { continue }
                 $rawExe = [string]$action.Executable
-                if ($action.Unquoted) {
-                    $shown = 'not parsed'
-                    if ($rawExe) { $shown = Format-SCShortText -Text $rawExe -Max 120 }
-                    [void]$extra.Add((New-SCFinding -Level 'WEAK' -Text ("Scheduled task '{0}' action path is unquoted and contains a space. Executable: {1}" -f $task.Name, $shown)))
-                    $hadFinding = $true
+                if ($action.Unquoted -and $rawExe) {
+                    $subject = "Scheduled task '{0}' action path" -f $task.Name
+                    if (Add-SCUnquotedFinding -Extra $extra -Subject $subject -Command $rawExe -Cache $pathCache) {
+                        $hadFinding = $true
+                    }
                 }
                 $exe = $null
                 if ($rawExe) { $exe = Expand-SCSystemPath -Path $rawExe }
@@ -1345,9 +1432,10 @@ function Invoke-SCCheckRunKeys {
             $exe = $null
             if ($entry.Executable) { $exe = Expand-SCSystemPath -Path $entry.Executable }
             if ($entry.Unquoted) {
-                $shown = 'not parsed'
-                if ($exe) { $shown = Format-SCShortText -Text $exe -Max 120 }
-                [void]$extra.Add((New-SCFinding -Level 'WEAK' -Text ("Run value '{0}' is unquoted and contains a space. Executable: {1}" -f $label, $shown)))
+                $command = [string]$entry.Executable
+                if (-not $command -and $exe) { $command = [string]$exe }
+                $subject = "Run value '{0}'" -f $label
+                [void](Add-SCUnquotedFinding -Extra $extra -Subject $subject -Command $command -Cache $pathCache)
             }
             if ($exe -and (Test-SCUncPath -Path $exe)) {
                 [void]$extra.Add((New-SCFinding -Level 'REVIEW' -Text ("Run value '{0}' uses a network path: {1}" -f $label, (Format-SCShortText -Text $exe -Max 120))))
